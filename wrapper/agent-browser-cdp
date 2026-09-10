@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+BASE=/docker/agent-browser
+explicit=false
+for arg in "$@"; do
+  case "$arg" in --cdp|--cdp=*|--auto-connect) explicit=true;; esac
+done
+if "$explicit"; then exec "$BASE/wrapper/agent-browser" "$@"; fi
+# Container-side CLI uses loopback to the gateway; host publication is also loopback-only.
+exec "$BASE/wrapper/agent-browser" --cdp http://127.0.0.1:9222 "$@"

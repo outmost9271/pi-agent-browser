@@ -1,0 +1,19 @@
+# Runtime state and credentials must never enter Git.
+/data/
+/profiles/
+/downloads/
+/screenshots/
+/backups/
+/artifacts/
+/.cache/
+/.test-runtime/
+.env
+.env.*
+!.env.example
+**/node_modules/
+**/dist/
+**/target/
+*.log
+*.pem
+*.key
+.DS_Store

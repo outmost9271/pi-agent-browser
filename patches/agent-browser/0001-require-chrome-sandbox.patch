@@ -1,0 +1,66 @@
+diff --git a/cli/src/native/cdp/chrome.rs b/cli/src/native/cdp/chrome.rs
+index 864e8c6..2b2cba0 100644
+--- a/cli/src/native/cdp/chrome.rs
++++ b/cli/src/native/cdp/chrome.rs
+@@ -576,7 +576,14 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
+         args.push("--force-webrtc-ip-handling-policy=disable_non_proxied_udp".to_string());
+     }
+ 
+-    if should_disable_sandbox(&args) {
++    // Deployment-specific opt-in; never silently fall back to an unsandboxed browser.
++    let require_sandbox = match std::env::var("PIAB_REQUIRE_SANDBOX") {
++        Err(std::env::VarError::NotPresent) => false,
++        Ok(value) if value == "1" => true,
++        _ => return Err("PIAB_REQUIRE_SANDBOX must be unset or exactly 1".to_string()),
++    };
++    validate_required_sandbox(&args, require_sandbox)?;
++    if !require_sandbox && should_disable_sandbox(&args) {
+         args.push("--no-sandbox".to_string());
+     }
+ 
+@@ -1509,6 +1516,45 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+     Ok(())
+ }
+ 
++fn validate_required_sandbox(args: &[String], required: bool) -> Result<(), String> {
++    if required {
++        for arg in args {
++            let name = arg.split('=').next().unwrap_or(arg);
++            if matches!(name,
++                "--no-sandbox" | "--disable-setuid-sandbox" |
++                "--disable-namespace-sandbox" | "--disable-seccomp-filter-sandbox" |
++                "--disable-gpu-sandbox" | "--single-process" | "--no-zygote") {
++                return Err(format!("PIAB_REQUIRE_SANDBOX conflicts with {name}"));
++            }
++        }
++    }
++    Ok(())
++}
++
++#[cfg(test)]
++mod required_sandbox_tests {
++    use super::validate_required_sandbox;
++
++    #[test]
++    fn rejects_sandbox_bypass_flags_including_equals_form() {
++        for flag in ["--no-sandbox", "--disable-setuid-sandbox",
++            "--disable-namespace-sandbox", "--disable-seccomp-filter-sandbox",
++            "--disable-gpu-sandbox", "--single-process", "--no-zygote"] {
++            for argument in [flag.to_string(), format!("{flag}=true")] {
++                assert!(validate_required_sandbox(&[argument.clone()], true).is_err());
++                assert!(validate_required_sandbox(&[argument], false).is_ok());
++            }
++        }
++    }
++
++    #[test]
++    fn preserves_regular_browser_arguments() {
++        assert!(validate_required_sandbox(&[
++            "--headless=new".to_string(), "--window-size=1280,720".to_string()
++        ], true).is_ok());
++    }
++}
++
+ /// Returns true if Chrome's sandbox should be disabled because the environment
+ /// doesn't support it (containers, VMs, CI runners, running as root).
+ fn should_disable_sandbox(existing_args: &[String]) -> bool {

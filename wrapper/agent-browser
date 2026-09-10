@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# 宿主机入口：直接 exec fnm 受控 Node，避免中间进程吞掉插件发送的 SIGTERM/SIGKILL，
+# 取消清理才能在插件 2 秒强制终止窗口内完成。
+set -euo pipefail
+
+BASE=/docker/agent-browser
+NODE_BIN=/pi/node/tool/fnm/aliases/default/bin/node
+ENTRY="$BASE/host-adapter/dist/index.js"
+
+if [[ ! -x "$NODE_BIN" ]]; then
+  # 受控别名缺失时退回 fnm 入口；信号传递由包装进程负责，仍不放宽其他限制。
+  if [[ -x /pi/node/tool/bin/fnm ]]; then
+    exec /pi/node/tool/bin/fnm exec --using=22 -- node "$ENTRY" --host-adapter-cwd "$PWD" "$@"
+  fi
+  echo '[agent-browser] controlled Node runtime is unavailable' >&2
+  exit 127
+fi
+
+[[ -f "$ENTRY" ]] || { echo '[agent-browser] build host-adapter first' >&2; exit 1; }
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+exec "$NODE_BIN" "$ENTRY" --host-adapter-cwd "$PWD" "$@"

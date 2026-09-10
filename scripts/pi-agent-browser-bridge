@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HOST_BASE="/docker/agent-browser"
+CONTAINER="pi-agent-browser"
+GATEWAY="http://127.0.0.1:9222"
+ADAPTER="/docker/agent-browser/host-adapter/dist/index.js"
+
+usage() {
+  cat <<'EOF'
+Usage: pi-agent-browser-bridge <command> [args]
+
+Commands:
+  status              Show container, config, and CDP status
+  doctor              Run host-adapter + container health checks
+  config check        Validate mounted config and env
+  cdp start           Ensure CDP gateway is running (idempotent)
+  cdp list            List CDP targets via gateway
+  cdp status          Show CDP gateway and Chrome status
+  cdp endpoint        Print CDP WebSocket endpoint for host
+  cdp stop            Stop CDP gateway's Chrome (removes profile lock)
+  help                Show this help
+EOF
+}
+
+check_container() {
+  if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
+    echo "container: running ($CONTAINER)"
+  else
+    echo "container: NOT running"
+    return 1
+  fi
+  docker inspect --format '  image: {{.Image}}  health: {{.State.Health.Status}}  restart: {{.RestartCount}}' "$CONTAINER" 2>&1 | head -5
+}
+
+check_config() {
+  echo "=== Config ==="
+  if [[ -f "$HOST_BASE/config/agent-browser.json" ]]; then
+    echo "host config: $HOST_BASE/config/agent-browser.json"
+    cat "$HOST_BASE/config/agent-browser.json" | head -20
+    echo ""
+    if command -v python3 >/dev/null 2>&1; then
+      python3 -m json.tool "$HOST_BASE/config/agent-browser.json" >/dev/null && echo "  JSON: valid" || echo "  JSON: INVALID"
+    fi
+    # Check for invalid fields
+    if grep -q '"headless"' "$HOST_BASE/config/agent-browser.json"; then echo "  ERROR: invalid field 'headless' (should be 'headed')"; fi
+    if grep -q '"autosaveIntervalMs"' "$HOST_BASE/config/agent-browser.json"; then echo "  ERROR: invalid 'autosaveIntervalMs' (use env)"; fi
+    if grep -q '"stateExpireDays"' "$HOST_BASE/config/agent-browser.json"; then echo "  ERROR: invalid 'stateExpireDays' (use env)"; fi
+    if grep -q '"profile"' "$HOST_BASE/config/agent-browser.json"; then echo "  WARN: 'profile' in base config (should be explicit per-call)"; fi
+    if grep -q '"headed"' "$HOST_BASE/config/agent-browser.json"; then echo "  OK: 'headed' present"; fi
+  else
+    echo "host config: MISSING"
+  fi
+  echo ""
+  echo "container config:"
+  docker exec "$CONTAINER" cat /etc/agent-browser/config.json 2>&1 | head -20 || echo "  not mounted or unreadable"
+  echo ""
+  echo "env:"
+  docker exec "$CONTAINER" env | grep -E "AGENT_BROWSER|PIAB" | sort | head -20
+}
+
+check_cdp() {
+  echo "=== CDP ==="
+  echo "gateway: $GATEWAY"
+  if curl -sf "$GATEWAY/json/version" 2>/dev/null | grep -q webSocketDebuggerUrl; then
+    echo "  HTTP: ok"
+    curl -s "$GATEWAY/json/version" | head -20
+  else
+    echo "  HTTP: FAILED"
+  fi
+  if docker exec "$CONTAINER" curl -sf http://127.0.0.1:9223/json/version 2>/dev/null | grep -q webSocketDebuggerUrl; then
+    echo "  internal (9223): ok"
+  else
+    echo "  internal (9223): FAILED"
+  fi
+  echo ""
+  echo "targets via gateway:"
+  curl -s "$GATEWAY/json/list" 2>&1 | head -50 || echo "  failed"
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+  status)
+    check_container || true
+    echo ""
+    check_config
+    echo ""
+    check_cdp
+    ;;
+  doctor)
+    echo "=== Doctor ==="
+    echo "host-adapter:"
+    if [[ -f "$ADAPTER" ]]; then
+      echo "  found $ADAPTER"
+      /pi/node/tool/bin/fnm exec --using=22 -- node "$ADAPTER" doctor --quick --offline 2>&1 | tail -20 || true
+    else
+      echo "  MISSING $ADAPTER"
+    fi
+    echo ""
+    echo "container doctor:"
+    docker exec "$CONTAINER" agent-browser doctor --quick --offline 2>&1 | tail -30 || true
+    echo ""
+    check_cdp
+    ;;
+  config)
+    sub="${2:-check}"
+    if [[ "$sub" == "check" ]]; then
+      check_config
+    else
+      echo "unknown config subcommand: $sub" >&2; usage; exit 1
+    fi
+    ;;
+  cdp)
+    sub="${2:-status}"
+    case "$sub" in
+      start)
+        echo "Ensuring container running..."
+        (cd "$HOST_BASE" && docker compose up -d) || true
+        sleep 2
+        check_cdp
+        ;;
+      list)
+        curl -s "$GATEWAY/json/list" | head -100
+        ;;
+      status)
+        check_cdp
+        docker exec "$CONTAINER" ps aux | grep -E "chrome|gateway" | head -10
+        ;;
+      endpoint)
+        curl -s "$GATEWAY/json/version" | grep -o '"webSocketDebuggerUrl":"[^"]*"' | head -1 || echo "failed"
+        ;;
+      stop)
+        echo "Stopping CDP Chrome (removing lock)..."
+        docker exec "$CONTAINER" pkill -f "chrome.*--remote-debugging-port=9223" || true
+        docker exec "$CONTAINER" rm -rf /tmp/cdp-gateway-profile/SingletonLock 2>&1 | head -5 || true
+        sleep 2
+        check_cdp
+        ;;
+      *)
+        echo "unknown cdp subcommand: $sub" >&2; usage; exit 1
+        ;;
+    esac
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "unknown command: $cmd" >&2; usage; exit 1
+    ;;
+esac

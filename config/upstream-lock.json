@@ -1,0 +1,14 @@
+{
+  "agent-browser": {
+    "version": "0.36.0",
+    "commit": "eb05921bad874cd2a1b4fa5d1149f1ed26576cae"
+  },
+  "pi-agent-browser-native": {
+    "version": "0.6.8",
+    "commit": "e5dcc87d9f30af5db1472c51c8d6a0e1aa131fe0"
+  },
+  "moby-profiles": {
+    "commit": "61eaf32614c7c71b60bd8927d3e6a4ffc8ff1f31",
+    "license": "Apache-2.0"
+  }
+}

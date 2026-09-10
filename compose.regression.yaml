@@ -1,0 +1,37 @@
+# Isolated image smoke. Never shares production profiles, state, sessions or host ports.
+name: piab-functional-regression
+services:
+  browser:
+    image: pi-agent-browser:review-fixed
+    container_name: piab-functional-regression
+    read_only: true
+    shm_size: 1g
+    tmpfs:
+      - /tmp:size=512M,mode=1777
+      - /run:size=64M,mode=755
+      - /home/agent/.agent-browser:size=128M,uid=1001,gid=1001,mode=700
+      - /home/agent/.cache:size=256M,uid=1001,gid=1001,mode=700
+      - /home/agent/.config:size=64M,uid=1001,gid=1001,mode=700
+      - /home/agent/.pki:size=64M,uid=1001,gid=1001,mode=700
+      - /downloads:size=64M,uid=1001,gid=1001,mode=700
+      - /screenshots:size=64M,uid=1001,gid=1001,mode=700
+    volumes:
+      - ./config/agent-browser.json:/etc/agent-browser/config.json:ro
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, FOWNER, KILL, SYS_CHROOT, SYS_ADMIN]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./config/seccomp-browser.json
+      - apparmor:unconfined
+    environment:
+      PIAB_CDP_GATEWAY_PORT: 9224
+    ports:
+      - 127.0.0.1:9224:9224
+    cpus: 2
+    mem_limit: 4g
+    pids_limit: 2048
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS http://127.0.0.1:9224/json/version | grep -q webSocketDebuggerUrl']
+      interval: 3s
+      timeout: 5s
+      retries: 20

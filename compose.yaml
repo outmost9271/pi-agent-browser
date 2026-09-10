@@ -1,0 +1,89 @@
+name: pi-agent-browser
+
+services:
+  agent-browser:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 仅构建期需要代理下载 npm/Chrome，后续浏览器访问走标准网络
+        # 如需代理，取消注释并填入你的代理地址
+        # HTTP_PROXY: http://host.docker.internal:10808
+        # HTTPS_PROXY: http://host.docker.internal:10808
+        AGENT_BROWSER_VERSION: 0.36.0
+    image: pi-agent-browser:0.36.0
+    container_name: pi-agent-browser
+    shm_size: 1g
+    read_only: true
+    tmpfs:
+      - /tmp:size=512M,mode=1777
+      - /run:size=64M,mode=755
+      - /home/agent/.cache:size=256M,mode=700,uid=1001,gid=1001
+      - /home/agent/.config:size=64M,mode=700,uid=1001,gid=1001
+      - /home/agent/.pki:size=64M,mode=700,uid=1001,gid=1001
+    volumes:
+      # 宿主机目录挂载（bind mount），不使用 named volume
+      - type: bind
+        source: ./data
+        target: /home/agent/.agent-browser
+      - type: bind
+        source: ./profiles
+        target: /profiles
+      - type: bind
+        source: ./downloads
+        target: /downloads
+      - type: bind
+        source: ./screenshots
+        target: /screenshots
+      - type: bind
+        source: ./config/agent-browser.json
+        target: /etc/agent-browser/config.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.cache/staging
+        target: /tmp/piab-staging
+        bind:
+          create_host_path: true
+    environment:
+      TZ: Asia/Shanghai
+      AGENT_BROWSER_CONFIG: /etc/agent-browser/config.json
+      AGENT_BROWSER_IDLE_TIMEOUT_MS: 3600000
+      AGENT_BROWSER_AUTOSAVE_INTERVAL_MS: 30000
+      AGENT_BROWSER_STATE_EXPIRE_DAYS: 30
+      PIAB_REQUIRE_SANDBOX: 1
+      PIAB_CDP_INTERNAL_PORT: 9223
+      PIAB_CDP_GATEWAY_PORT: 9222
+    ports:
+      # CDP 网关，仅宿主机回环可达
+      - target: 9222
+        published: 9222
+        protocol: tcp
+        mode: ingress
+        host_ip: 127.0.0.1
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - FOWNER
+      - KILL
+      - SYS_CHROOT
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./config/seccomp-browser.json
+      - apparmor:unconfined
+    cpus: 2.0
+    mem_limit: 4g
+    mem_reservation: 512m
+    pids_limit: 2048
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9222/json/version | grep -q webSocketDebuggerUrl && agent-browser doctor --quick --offline || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

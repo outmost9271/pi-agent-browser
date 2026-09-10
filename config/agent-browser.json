@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-browser.dev/schema.json",
+  "headed": false,
+  "idleTimeout": "1h",
+  "downloadPath": "/downloads",
+  "screenshotDir": "/screenshots",
+  "contentBoundaries": true,
+  "maxOutput": 50000
+}
