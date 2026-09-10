@@ -10,7 +10,12 @@ mkdir -p .cache/functional-regression/logs
 "${NODE[@]}" npm --prefix host-adapter run build
 "${NODE[@]}" npm --prefix host-adapter test | tee .cache/functional-regression/logs/unit.tap
 "${NODE[@]}" node host-adapter/test-script-env.mjs
-"${NODE[@]}" node scripts/patch-plugin-script-node.mjs
+# script 补丁仅用于旧的 npm 安装路径；git fork 安装的源码已内置修复，不存在旧路径时跳过。
+if [[ -d /agent-pi/config/npm/node_modules/pi-agent-browser-native ]]; then
+  "${NODE[@]}" node scripts/patch-plugin-script-node.mjs
+else
+  echo "Skip plugin script patch: npm install absent; the git fork build already includes the fix."
+fi
 bash -n wrapper/agent-browser wrapper/agent-browser-cdp
 "${NODE[@]}" node --check container-agent/cdp-gateway.mjs
 if [[ ${1:-} != --live ]]; then
